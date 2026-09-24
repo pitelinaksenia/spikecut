@@ -18,4 +18,4 @@ RUN uv sync --frozen
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD ["uvicorn", "spikecut.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "spikecut.entrypoints.api:app", "--host", "0.0.0.0", "--port", "8000"]

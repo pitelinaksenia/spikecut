@@ -1,7 +1,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from spikecut.api.main import app
+from spikecut.api.app import app
 
 
 @pytest.mark.asyncio
