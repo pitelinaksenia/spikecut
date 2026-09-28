@@ -1,24 +1,22 @@
-from functools import lru_cache
+from pathlib import Path
 
+from pydantic import PostgresDsn, RedisDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="SPIKECUT_", extra="ignore")
 
-    database_url: str
-    redis_url: str
-    api_key: str
+    database_url: PostgresDsn
+    redis_url: RedisDsn
 
     s3_endpoint_url: str
     s3_access_key: str
-    s3_secret_key: str
+    s3_secret_key: SecretStr
     s3_bucket: str = "clips"
 
-    buffer_dir: str = "/buffer"
-    buffer_minutes: int = 5
+    buffer_dir: Path = Path("/buffer")
+    buffer_retention_s: int = 300
+    segment_duration_s: int = 2
 
-
-@lru_cache
-def get_settings() -> Settings:
-    return Settings()
+    log_level: str = "INFO"
