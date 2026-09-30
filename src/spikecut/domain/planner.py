@@ -1,4 +1,4 @@
-from spikecut.domain.errors import SegmentsExpiredError, SegmentsNotReadyError
+from spikecut.domain.errors import SegmentsExpiredError, SegmentsMissingError, SegmentsNotReadyError
 from spikecut.domain.models import ClipPlan, ClipRequest, Segment
 
 GAP_TOLERANCE_S = 1.5
@@ -8,6 +8,7 @@ def plan_clip(segments: list[Segment], req: ClipRequest) -> ClipPlan:
     if not segments:
         raise SegmentsNotReadyError("buffer is empty", available_s=0)
 
+    segments = sorted(segments, key=lambda s: s.start)
     available_s = (segments[-1].end - segments[0].start).total_seconds()
 
     if req.start < segments[0].start:
@@ -16,6 +17,10 @@ def plan_clip(segments: list[Segment], req: ClipRequest) -> ClipPlan:
         raise SegmentsNotReadyError("clip end is not recorded yet", available_s)
 
     selected = [s for s in segments if s.end > req.start and s.start < req.end]
+
+    if not selected:
+        raise SegmentsMissingError("no footage recorded for requested range", available_s)
+
     offset = (req.start - selected[0].start).total_seconds()
     duration = req.duration
 
