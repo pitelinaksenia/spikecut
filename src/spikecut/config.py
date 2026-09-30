@@ -1,3 +1,4 @@
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic import PostgresDsn, RedisDsn, SecretStr
@@ -5,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="SPIKECUT_", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: PostgresDsn
     redis_url: RedisDsn
@@ -20,3 +21,8 @@ class Settings(BaseSettings):
     segment_duration_s: int = 2
 
     log_level: str = "INFO"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
