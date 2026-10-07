@@ -1,12 +1,12 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from spikecut.domain.errors import ClipNotFoundError
-from spikecut.domain.models import Channel, Clip, ClipSource, ClipStatus
-from spikecut.infra.db.models import ChannelRow, ClipRow
+from spikecut.domain.models import Channel, Clip, ClipSource, ClipStatus, SessionStatus
+from spikecut.infra.db.models import ChannelRow, ClipRow, StreamSessionRow
 
 
 def _to_channel(row: ChannelRow) -> Channel:
@@ -60,6 +60,12 @@ class ChannelRepository:
             select(ChannelRow).order_by(ChannelRow.created_at, ChannelRow.id)
         )
         return [_to_channel(r) for r in rows]
+
+    async def get_by_login(self, platform: str, login: str) -> Channel | None:
+        row = await self._session.scalar(
+            select(ChannelRow).where(ChannelRow.platform == platform, ChannelRow.login == login)
+        )
+        return _to_channel(row) if row else None
 
 
 class ClipRepository:
@@ -137,3 +143,45 @@ class ClipRepository:
         row.size_bytes = size_bytes
         row.error = None
         await self._session.flush()
+
+
+class SessionRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def start(self, channel_id: UUID, started_at: datetime) -> UUID:
+        await self._session.execute(
+            update(StreamSessionRow)
+            .where(
+                StreamSessionRow.channel_id == channel_id,
+                StreamSessionRow.status == SessionStatus.LIVE,
+            )
+            .values(status=SessionStatus.INTERRUPTED, ended_at=started_at)
+        )
+        row = StreamSessionRow(
+            channel_id=channel_id, started_at=started_at, status=SessionStatus.LIVE
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return row.id
+
+    async def end(
+        self, session_id: UUID, ended_at: datetime, status: SessionStatus = SessionStatus.ENDED
+    ) -> None:
+        await self._session.execute(
+            update(StreamSessionRow)
+            .where(
+                StreamSessionRow.id == session_id,
+                StreamSessionRow.status == SessionStatus.LIVE,
+            )
+            .values(status=status, ended_at=ended_at)
+        )
+
+    async def get_live(self, channel_id: UUID) -> UUID | None:
+        session_id: UUID | None = await self._session.scalar(
+            select(StreamSessionRow.id).where(
+                StreamSessionRow.channel_id == channel_id,
+                StreamSessionRow.status == SessionStatus.LIVE,
+            )
+        )
+        return session_id
