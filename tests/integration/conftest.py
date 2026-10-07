@@ -1,7 +1,10 @@
+import asyncio
 import os
+from asyncio.subprocess import Process
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic import command
@@ -16,6 +19,22 @@ from spikecut.infra.db.models import HighlightRow, StreamSessionRow
 from spikecut.infra.db.repositories import ChannelRepository, ClipRepository
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture
+def no_orphans(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[Process]]:
+    """Record every spawned process and check none is left running after the test."""
+    procs: list[Process] = []
+    original = asyncio.create_subprocess_exec
+
+    async def tracking(*args: Any, **kwargs: Any) -> Process:
+        proc = await original(*args, **kwargs)
+        procs.append(proc)
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", tracking)
+    yield procs
+    assert all(p.returncode is not None for p in procs), "ffmpeg process left running"
 
 
 @pytest.fixture(scope="session")

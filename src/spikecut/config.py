@@ -22,6 +22,8 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    ffmpeg_path: str = "ffmpeg"
+
 
 @lru_cache
 def get_settings() -> Settings:
