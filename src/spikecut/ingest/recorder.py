@@ -54,11 +54,6 @@ class RecorderResult:
 
 
 class Recorder:
-    """One ffmpeg segmenting run: one process, one anchor, one run directory.
-
-    Single-use: to reconnect, create a new Recorder.
-    """
-
     def __init__(self, input_url: str, session_dir: Path, segment_time: int = 2) -> None:
         self._input_url = input_url
         self._session_dir = session_dir

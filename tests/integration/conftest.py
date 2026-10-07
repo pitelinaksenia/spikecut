@@ -1,5 +1,6 @@
 import asyncio
 import os
+import subprocess
 from asyncio.subprocess import Process
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
@@ -15,8 +16,10 @@ from testcontainers.community.postgres import PostgresContainer
 
 from spikecut.config import get_settings
 from spikecut.domain.models import Channel, SessionStatus
+from spikecut.infra import ffmpeg
 from spikecut.infra.db.models import HighlightRow, StreamSessionRow
 from spikecut.infra.db.repositories import ChannelRepository, ClipRepository
+from spikecut.ingest import recorder as recorder_module
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,6 +38,33 @@ def no_orphans(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[Process]]:
     monkeypatch.setattr(asyncio, "create_subprocess_exec", tracking)
     yield procs
     assert all(p.returncode is not None for p in procs), "ffmpeg process left running"
+
+
+@pytest.fixture(scope="session")
+def source_video(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """5 s test video with a keyframe every second, so segments can be cut every 2 s."""
+    path = tmp_path_factory.mktemp("src") / "source.mp4"
+    subprocess.run(
+        [
+            ffmpeg.FFMPEG_BIN, "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc=duration=5:size=320x240:rate=25",
+            "-c:v", "libx264", "-preset", "ultrafast", "-g", "25",
+            str(path),
+        ],
+        check=True,
+    )  # fmt: skip
+    return path
+
+
+@pytest.fixture
+def endless_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ffmpeg loop the source in real time, like a live stream that never ends."""
+    original = recorder_module.segment_args
+
+    def looping(input_url: str, run_dir: Path, segment_time: int = 2) -> list[str]:
+        return ["-re", "-stream_loop", "-1", *original(input_url, run_dir, segment_time)]
+
+    monkeypatch.setattr(recorder_module, "segment_args", looping)
 
 
 @pytest.fixture(scope="session")

@@ -22,7 +22,8 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    ffmpeg_path: str = "ffmpeg"
+    video_quality: str = "720p"
+    demo_stream_url: str | None = None
 
 
 @lru_cache

@@ -1,12 +1,10 @@
 import asyncio
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from spikecut.infra import ffmpeg
-from spikecut.ingest import recorder as recorder_module
 from spikecut.ingest.buffer import SEGMENT_LIST, parse_segment_list, to_segments
 from spikecut.ingest.recorder import Recorder
 from spikecut.time import utc_now
@@ -15,33 +13,6 @@ pytestmark = [
     pytest.mark.skipif(shutil.which(ffmpeg.FFMPEG_BIN) is None, reason="ffmpeg not installed"),
     pytest.mark.usefixtures("no_orphans"),
 ]
-
-
-@pytest.fixture(scope="module")
-def source_video(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """5 s test video with a keyframe every second, so segments can be cut every 2 s."""
-    path = tmp_path_factory.mktemp("src") / "source.mp4"
-    subprocess.run(
-        [
-            ffmpeg.FFMPEG_BIN, "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "lavfi", "-i", "testsrc=duration=5:size=320x240:rate=25",
-            "-c:v", "libx264", "-preset", "ultrafast", "-g", "25",
-            str(path),
-        ],
-        check=True,
-    )  # fmt: skip
-    return path
-
-
-@pytest.fixture
-def endless_input(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make ffmpeg loop the source in real time, like a live stream that never ends."""
-    original = recorder_module.segment_args
-
-    def looping(input_url: str, run_dir: Path, segment_time: int = 2) -> list[str]:
-        return ["-re", "-stream_loop", "-1", *original(input_url, run_dir, segment_time)]
-
-    monkeypatch.setattr(recorder_module, "segment_args", looping)
 
 
 async def test_records_finite_input(source_video: Path, tmp_path: Path) -> None:

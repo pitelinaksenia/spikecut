@@ -45,3 +45,7 @@ packages = ["src/spikecut"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[[tool.mypy.overrides]]
+module = "streamlink.*"
+no_implicit_reexport = false
