@@ -9,9 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from spikecut.domain.errors import ClipNotFoundError
 from spikecut.domain.models import Channel, ClipSource, ClipStatus, SessionStatus
 from spikecut.infra.db.models import ChannelRow, ClipRow, StreamSessionRow
-from spikecut.infra.db.repositories import ChannelRepository, ClipRepository
+from spikecut.infra.db.repositories import ChannelRepository, ClipRepository, SessionRepository
 
 MSK = timezone(timedelta(hours=3))
+T = datetime(2026, 1, 1, 12, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -32,6 +33,18 @@ def make_clip(clips: ClipRepository, channel: Channel, stream_session: StreamSes
 
 async def set_created_at(session: AsyncSession, model, id_: UUID, value: datetime) -> None:
     await session.execute(update(model).where(model.id == id_).values(created_at=value))
+
+
+@pytest.fixture
+def sessions(session: AsyncSession) -> SessionRepository:
+    return SessionRepository(session)
+
+
+async def get_session_row(session: AsyncSession, session_id: UUID) -> StreamSessionRow:
+    session.expunge_all()
+    row = await session.get(StreamSessionRow, session_id)
+    assert row is not None
+    return row
 
 
 # --- channels ---
@@ -59,6 +72,18 @@ async def test_channel_duplicate_platform_login(channels: ChannelRepository):
 
     with pytest.raises(IntegrityError):
         await channels.create("twitch", "foo")
+
+
+async def test_channel_get_by_login(channels: ChannelRepository):
+    twitch = await channels.create("twitch", "foo")
+    await channels.create("youtube", "foo")
+
+    got = await channels.get_by_login("twitch", "foo")
+
+    assert got is not None
+    assert got.id == twitch.id
+    assert await channels.get_by_login("twitch", "bar") is None
+    assert await channels.get_by_login("kick", "foo") is None
 
 
 async def test_channel_list_all_order(session: AsyncSession, channels: ChannelRepository):
@@ -183,6 +208,84 @@ async def test_update_missing_clip_raises(clips: ClipRepository):
     with pytest.raises(ClipNotFoundError) as exc:
         await clips.mark_ready(missing, storage_key="k", thumbnail_key="t", size_bytes=1)
     assert exc.value.clip_id == missing
+
+
+# --- sessions ---
+
+
+async def test_session_start_creates_live(
+    session: AsyncSession, sessions: SessionRepository, channel: Channel
+):
+    session_id = await sessions.start(channel.id, T)
+
+    row = await get_session_row(session, session_id)
+    assert (row.channel_id, row.status, row.started_at, row.ended_at) == (
+        channel.id,
+        SessionStatus.LIVE,
+        T,
+        None,
+    )
+    assert await sessions.get_live(channel.id) == session_id
+
+
+async def test_session_start_interrupts_previous_live(
+    session: AsyncSession, sessions: SessionRepository, channel: Channel
+):
+    first = await sessions.start(channel.id, T)
+    second = await sessions.start(channel.id, T + timedelta(hours=1))
+
+    old = await get_session_row(session, first)
+    assert (old.status, old.ended_at) == (SessionStatus.INTERRUPTED, T + timedelta(hours=1))
+    assert (await get_session_row(session, second)).status == SessionStatus.LIVE
+    assert await sessions.get_live(channel.id) == second
+
+
+async def test_session_start_keeps_other_channels_live(
+    session: AsyncSession, sessions: SessionRepository, channels: ChannelRepository, channel
+):
+    other = await channels.create("twitch", "other")
+    other_session = await sessions.start(other.id, T)
+
+    await sessions.start(channel.id, T + timedelta(minutes=1))
+
+    assert (await get_session_row(session, other_session)).status == SessionStatus.LIVE
+    assert await sessions.get_live(other.id) == other_session
+
+
+async def test_session_end(session: AsyncSession, sessions: SessionRepository, channel: Channel):
+    session_id = await sessions.start(channel.id, T)
+
+    await sessions.end(session_id, T + timedelta(hours=2))
+
+    row = await get_session_row(session, session_id)
+    assert (row.status, row.ended_at) == (SessionStatus.ENDED, T + timedelta(hours=2))
+    assert await sessions.get_live(channel.id) is None
+
+
+async def test_session_end_with_status(
+    session: AsyncSession, sessions: SessionRepository, channel: Channel
+):
+    session_id = await sessions.start(channel.id, T)
+
+    await sessions.end(session_id, T + timedelta(hours=1), SessionStatus.INTERRUPTED)
+
+    assert (await get_session_row(session, session_id)).status == SessionStatus.INTERRUPTED
+
+
+async def test_session_end_leaves_closed_session_alone(
+    session: AsyncSession, sessions: SessionRepository, channel: Channel
+):
+    first = await sessions.start(channel.id, T)
+    await sessions.start(channel.id, T + timedelta(hours=1))  # interrupts the first one
+
+    await sessions.end(first, T + timedelta(hours=5))
+
+    old = await get_session_row(session, first)
+    assert (old.status, old.ended_at) == (SessionStatus.INTERRUPTED, T + timedelta(hours=1))
+
+
+async def test_session_get_live_without_sessions(sessions: SessionRepository, channel: Channel):
+    assert await sessions.get_live(channel.id) is None
 
 
 # --- constraints ---
