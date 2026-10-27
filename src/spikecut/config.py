@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     video_quality: str = "720p"
     demo_stream_url: str | None = None
+    ingest_channel: str = "demo"
 
 
 @lru_cache
