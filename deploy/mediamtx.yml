@@ -1,0 +1,21 @@
+# Demo media server: fake-streamer publishes over RTMP, ingest reads the same stream over HLS,
+# exactly like it reads Twitch.
+logLevel: info
+
+rtmp: yes
+rtmpAddress: :1935
+
+hls: yes
+hlsAddress: :8888
+# Plain MPEG-TS segments: closest to what Twitch serves and what the recorder writes.
+hlsVariant: mpegts
+# Start the HLS muxer as soon as a stream is published, not on the first viewer request,
+# so ingest gets a ready playlist instead of waiting on a cold muxer.
+hlsAlwaysRemux: yes
+
+rtsp: no
+webrtc: no
+srt: no
+
+paths:
+  all_others:

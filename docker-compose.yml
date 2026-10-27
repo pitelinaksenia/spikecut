@@ -1,3 +1,8 @@
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://clipper:clipper@postgres:5432/clipper
+  REDIS_URL: redis://redis:6379/0
+  S3_ENDPOINT_URL: http://minio:9000
+
 services:
   postgres:
     image: postgres:16
@@ -37,17 +42,22 @@ services:
     volumes:
       - minio_data:/data
 
+  migrate:
+    build: .
+    command: alembic upgrade head
+    env_file:
+      - .env
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build: .
     command: uvicorn spikecut.entrypoints.api:app --host 0.0.0.0 --port 8000 --reload
     env_file:
       - .env
-    environment:
-      # Overrides for in-network container hostnames (env_file uses localhost
-      # values meant for running services outside Docker).
-      DATABASE_URL: postgresql+asyncpg://clipper:clipper@postgres:5432/clipper
-      REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT_URL: http://minio:9000
+    environment: *app-env
     ports:
       - "8000:8000"
     volumes:
@@ -59,7 +69,76 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
+
+  ingest:
+    build: .
+    command: python -m spikecut.entrypoints.ingest
+    env_file:
+      - .env
+    environment:
+      <<: *app-env
+      BUFFER_DIR: /buffer
+    init: true
+    stop_grace_period: 20s
+    restart: unless-stopped
+    volumes:
+      - ./src:/app/src
+      - buffer:/buffer
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    profiles: [demo]
+    volumes:
+      - ./deploy/mediamtx.yml:/mediamtx.yml:ro
+    ports:
+      - "8888:8888"
+
+  fake-streamer:
+    build: .
+    profiles: [demo]
+    entrypoint: ["ffmpeg"]
+    command:
+      - -hide_banner
+      - -loglevel
+      - warning
+      - -re
+      - -f
+      - lavfi
+      - -i
+      - testsrc=size=1280x720:rate=30
+      - -f
+      - lavfi
+      - -i
+      - sine=frequency=440:sample_rate=44100
+      - -c:v
+      - libx264
+      - -preset
+      - veryfast
+      - -tune
+      - zerolatency
+      - -pix_fmt
+      - yuv420p
+      - -g
+      - "60"
+      - -c:a
+      - aac
+      - -b:a
+      - 96k
+      - -f
+      - flv
+      - rtmp://mediamtx:1935/demo
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
 
 volumes:
   postgres_data:
   minio_data:
+  buffer:
